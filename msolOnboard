@@ -1,0 +1,107 @@
+# Cloud onboarding script
+# Can be obtained from https://goo.gl/TwrO0S
+# Last edited on Jan 31 2016
+
+$transcriptname = "onboard" + (Get-Date -Format s).Replace(":","-") +".csv"
+ 
+Start-Transcript $transcriptname
+
+################################
+# first section sets country, license, quota & retention policies
+################################
+
+
+# imports data copied from the Onboarding spreadsheet
+# Sets parameters from columns in the csv file
+#
+
+
+import-csv msolonboard.csv | foreach-object { 
+	$email=$_."email"
+	$co=$_."Country"
+	$license=$_."License"
+	
+
+# Sets Country
+
+    If ($license -like "shared" -or $license -like "resource") {}
+
+    If ($license -ne "shared" -or $license -ne "resource") {
+    Set-MSOLUser –UserPrincipalName $email –UsageLocation $co
+    write-host "Country has been assigned for user" $email
+    }
+
+
+# Sets the license, quota and retention policies
+
+	if ($license -eq "E3 License" -or $license -eq "USL") {
+	Set-MsolUserLicense -UserPrincipalName $email -AddLicenses "smithandnephew:ENTERPRISEPACK"
+	Set-Mailbox $email -ProhibitSendQuota 25GB -ProhibitSendReceiveQuota 27.5GB -IssueWarningQuota 22.5GB -RetentionPolicy ‘SNI Custom Policy 3’ -RetainDeletedItemsFor 30
+	write "E3 license, 25gb quota and SNI Custom Policy 3 has been applied to"$email
+	}
+	if($license -eq "K1 License") {
+	Set-MsolUserLicense -UserPrincipalName $email -AddLicenses "smithandnephew:DESKLESSPACK"
+	Set-Mailbox $email -RetentionPolicy ‘SNI K1 Custom Policy 3’ -RetainDeletedItemsFor 30
+	write "K1 license, 2gb quota and SNI K1 Custom Policy 3 has been applied to"$email
+	}
+    if ($license -eq "shared") {
+	Set-mailbox $email -type shared
+	Set-Mailbox $email -ProhibitSendQuota 10GB -ProhibitSendReceiveQuota 12GB -IssueWarningQuota 8.5GB -RetentionPolicy ‘SNI K1 Custom Policy 3’ -RetainDeletedItemsFor 30
+	write "Shared mailbox; no license applied, 10gb quota and SNI K1 Custom Policy 3 has been applied to"$email
+	}
+    if ($license -eq "Resource") {
+	Set-mailbox $email -type room
+	Set-Mailbox $email -ProhibitSendQuota 10GB -ProhibitSendReceiveQuota 12GB -IssueWarningQuota 8.5GB -RetentionPolicy ‘SNI K1 Custom Policy 3’ -RetainDeletedItemsFor 30
+	write "Room Resource mailbox; no license applied, 10gb quota and SNI K1 Custom Policy 3 has been applied to"$email
+	}
+	write "================================================================="
+
+}
+
+
+################################
+# second section applies the Lync/Skype for Business policies
+################################
+
+
+write-host "The 60 second pause is necessary to allow the licenses to replicate as the policies will not apply if the E3 license is not in place."
+write-host "60 second pause."
+start-sleep -s 30
+write-host "30 seconds remain."
+start-sleep -s 15
+write-host "15 seconds remain."
+start-sleep -s 10
+write-host "5 seconds remain."
+start-sleep -s 5
+
+import-csv msolonboard.csv | foreach-object {
+
+	$email=$_."email"
+	$license=$_."License"
+
+# Disable Clutter
+	Set-Clutter -Identity $email -Enable $false
+    write-host "Clutter has been disabled for user" $email
+    
+
+
+# Sets Skype for Business policies
+# Enables Skype UI
+If ($license -like "shared" -or $license -like "resource") {}
+
+if ($license -eq "E3 License" -or $license -eq "USL") {
+
+    		Grant-CsConferencingPolicy –Identity $_.Email -PolicyName BposSVoipDisabledNoRecNoDialout
+    		Grant-CsExternalAccessPolicy –Identity $_.Email -PolicyName FederationAndPICDefault
+    		Grant-CsClientPolicy -identity $_.Email –PolicyName ClientPolicyEnableSkypeUI
+    
+write-host "Skype for Business policies have been assigned for user" $email
+	}
+	
+if($license -eq "K1 License") {
+write-host "Skype for Business policies are not applicable for K1 licensee" $email
+}
+
+}
+
+stop-transcript
