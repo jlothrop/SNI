@@ -1,0 +1,168 @@
+# Cloud offboarding script
+# Obtainable from https://goo.gl/BBYcGO
+# Last edited Jan 31 2016
+
+$transcriptname = "offboard" + (Get-Date -Format s).Replace(":","-") +".csv"
+ 
+Start-Transcript $transcriptname
+$users=import-csv msoloffboard.csv
+
+################################
+# first section sets license to E3 if it is not already set
+################################
+
+
+# imports data copied from the Offboarding spreadsheet
+# Sets parameters from columns in the csv file
+#
+write "================================================================="
+write "============  Checking and setting license to E3  ==============="
+write "================================================================="
+
+
+# Sets the license if license does not equal "E3"
+# License needs to be an E3 in order to set the Litigation Hold
+
+	
+$users | foreach-object {
+	$alias=$_."alias"
+	$email=$_."email"
+    $License=get-msoluser -userprincipalname $email    
+    if ($License.Licenses.AccountSkuid -like "smithandnephew:DESKLESSPACK")  {
+    write "$email has a K1 license"
+    Set-MsolUserLicense -UserPrincipalName $email -RemoveLicenses "smithandnephew:DESKLESSPACK" -AddLicenses "smithandnephew:ENTERPRISEPACK"
+	
+    Do {start-sleep -s 5; $License=get-msoluser -userprincipalname $email; write-host "E3 License not yet applied"}
+    Until ($License.Licenses.AccountSkuid -like "smithandnephew:ENTERPRISEPACK")
+    write "E3 license has been applied to $email"
+    	}
+     if ($License.Licenses.AccountSkuid -eq $null)  {
+     Set-MSOLUser –UserPrincipalName $email –UsageLocation "US"
+     write "$email does not have a license"
+    Set-MsolUserLicense -UserPrincipalName $email -AddLicenses "smithandnephew:ENTERPRISEPACK"
+    	
+    Do {start-sleep -s 5; $License=get-msoluser -userprincipalname $email; write-host "E3 License not yet applied"}
+    Until ($License.Licenses.AccountSkuid -like "smithandnephew:ENTERPRISEPACK")
+    write "E3 license has been applied to $email"
+    }
+
+    if ($License.Licenses.AccountSkuid -like "smithandnephew:INTUNE_A")  {
+    write "$email has an InTune license; removing."
+    Set-MsolUserLicense -UserPrincipalName $email -RemoveLicenses "smithandnephew:INTUNE_A"
+
+    }
+}
+
+
+################################
+# second section disables mail features on the mailbox itself
+################################
+
+write "================================================================="
+write "============      Disabling Mailbox Features      ==============="
+write "================================================================="
+
+	
+$users | foreach-object {
+	$alias=$_."alias"
+	
+#disables OWA for Devices
+Set-CASMailbox -Identity $alias -OWAforDevicesEnabled $false
+
+#disables Outlook on the Web
+Set-CASMailbox -Identity $alias -OWAEnabled $false
+
+#disables MAPI
+Set-CASMailbox -Identity $alias -MAPIEnabled $false
+
+#disables IMAP
+Set-CASMailbox -Identity $alias -ImapEnabled $false
+
+#disables POP
+Set-CASMailbox -Identity $alias -PopEnabled $false
+
+#disables ActiveSync
+Set-CASMailbox -Identity $alias -ActiveSyncEnabled $false
+
+
+write "mailbox features have been disabled for $email"
+
+}
+
+
+
+write "================================================================="
+write "=================  60 second delay before ======================="
+write "================= Setting Litigation Hold ======================="
+write "================================================================="
+start-sleep -s 60
+
+################################
+# third section sets the litigation hold for 365 days
+################################
+
+$users | foreach-object {
+	$alias=$_."alias"
+	$email=$_."email"
+
+$lithold=get-mailbox $alias
+if ($lithold.LitigationHoldEnabled -eq $true){ 
+    write-error "$email already has a Litigation Hold enabled. Please investigate" 
+    {continue}
+    }
+
+Set-Mailbox $alias -LitigationHoldEnabled $true -LitigationHoldDuration 365
+   
+Do {start-sleep -s 5; $lithold=get-mailbox $alias; write-host "Waiting for Litigation Hold to take effect"}
+Until ($lithold.LitigationHoldenabled -eq $true)
+
+if ($lithold.LitigationHoldEnabled -eq $true) {write "Litigation Hold is enabled for $email"
+}
+if ($lithold.LitigationHoldEnabled -eq $false) {write "There was an error enabling the litigation hold for $email. Investigate ASAP."
+}
+
+	}
+	
+write "================================================================="
+write "====================== Removing licenses ========================"
+write "================================================================="
+start-sleep -s 10
+
+################################
+# fourth section removes the license
+################################
+
+$users | foreach-object {
+	$alias=$_."alias"
+	$email=$_."email"
+
+$userlicense=get-msoluser -UserPrincipalName $email
+Set-MsolUserLicense -UserPrincipalName $email -RemoveLicenses "smithandnephew:ENTERPRISEPACK"
+
+Do {start-sleep -s 5; $userlicense=get-msoluser -UserPrincipalName $email; write-host "Waiting for license to be removed"}
+Until ($userlicense.islicensed -eq $false)
+
+
+
+
+write "License has been removed for account $email"
+
+	}
+	
+write "=================================================================="
+write "===============  offboards are completed, ========================="
+write "===============  tasks can be closed and  ========================="
+write "===============  as soon as AD object is  ========================="
+write "===============  removed, mailboxes will  ========================="
+write "===============  be listed as inactive.   ========================="
+write "===============                           ========================="
+write "===============  Look through the logfile ========================="
+write "===============  and search for the word  ========================="
+write "=============== 'investigate' to determine========================="
+write "===============  any accounts that need   ========================="
+write "===============  following up with.       ========================="
+write "==================================================================="
+
+#end
+
+stop-transcript
